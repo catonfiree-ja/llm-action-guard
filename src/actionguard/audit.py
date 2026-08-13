@@ -160,7 +160,7 @@ class JsonlAudit:
         operator has asserted durability — it does not guess.
         """
         asserted = os.environ.get("AUDIT_DURABLE", "").lower() in ("1", "true", "yes")
-        where = self.path.resolve()
-        return (f"audit log at {where}; durability "
-                f"{'asserted by AUDIT_DURABLE' if asserted else 'NOT asserted — '
-                   'if this filesystem resets on deploy, history is lost'}")
+        state = ("asserted by AUDIT_DURABLE" if asserted else
+                 "NOT asserted — if this filesystem resets on deploy, "
+                 "history is lost")
+        return f"audit log at {self.path.resolve()}; durability {state}"
