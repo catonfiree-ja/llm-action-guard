@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "actionguard"
+version = "0.1.0"
+description = "Let a language model decide, without letting it act. A validation layer for systems where a wrong model output costs money."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Peerawith Sirichaicharoen", email = "soundtruear@gmail.com" }]
+keywords = ["llm", "agents", "guardrails", "safety", "validation", "ai-automation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[project.urls]
+Source = "https://github.com/catonfiree-ja/llm-action-guard"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules --cov=actionguard --cov-report=term-missing"
+pythonpath = ["src"]
