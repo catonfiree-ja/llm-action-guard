@@ -68,3 +68,54 @@ class TestFilter:
         rows = [dict(r) for r in self.ROWS]
         GATE.filter(rows, successes="clicks", exposure="impr", cost="cost")
         assert all("_confidence" not in r for r in rows)
+
+
+class TestEmptyAndNoneInput:
+    """Missing metrics are the normal case for a campaign that just started.
+    They must read as 'not enough to judge', never as 'nothing wrong'."""
+
+    def test_filtering_nothing_returns_nothing(self):
+        assert GATE.filter([], successes="clicks", exposure="impr",
+                           cost="cost") == ([], [])
+
+    def test_null_metrics_count_as_zero_rather_than_crashing(self):
+        rows = [{"id": "x", "clicks": None, "impr": None, "cost": None}]
+        keep, skip = GATE.filter(rows, successes="clicks", exposure="impr",
+                                 cost="cost")
+        assert not keep and [r["id"] for r in skip] == ["x"]
+        assert "too thin" in skip[0]["_confidence"]
+
+    @pytest.mark.parametrize("blank", [None, "", 0])
+    def test_a_blank_cost_cannot_open_the_second_door(self, blank):
+        """High exposure alone is not evidence of waste — spending is."""
+        rows = [{"id": "x", "clicks": 1, "impr": 30_000, "cost": blank}]
+        keep, _ = GATE.filter(rows, successes="clicks", exposure="impr",
+                              cost="cost")
+        assert not keep
+
+    def test_omitting_the_cost_column_keeps_the_cost_floor_shut(self):
+        """`cost=None` means 'no cost data', so a gate with a cost floor must
+        refuse rather than assume the floor was met."""
+        rows = [{"id": "x", "clicks": 1, "impr": 30_000}]
+        keep, skip = GATE.filter(rows, successes="clicks", exposure="impr")
+        assert not keep and len(skip) == 1
+
+    def test_an_empty_row_is_skipped_not_trusted(self):
+        keep, skip = GATE.filter([{}], successes="clicks", exposure="impr",
+                                 cost="cost")
+        assert not keep and len(skip) == 1
+
+    def test_an_all_zero_gate_trusts_everything(self):
+        """Documented so it is chosen, not stumbled into: thresholds of zero
+        are not a gate at all — every empty row passes."""
+        assert ConfidenceGate(min_successes=0, min_exposure=0,
+                              min_cost=0).check(successes=0, exposure=0)
+
+    def test_the_default_gate_still_refuses_empty_data(self):
+        assert not ConfidenceGate().check(successes=0, exposure=0)
+
+    def test_zero_thresholds_are_allowed_only_negatives_are_not(self):
+        ConfidenceGate(min_successes=0, min_exposure=0, min_cost=0)
+        for kwargs in ({"min_exposure": -1}, {"min_cost": -0.01}):
+            with pytest.raises(ValueError):
+                ConfidenceGate(**kwargs)

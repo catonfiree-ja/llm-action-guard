@@ -61,3 +61,46 @@ def test_the_reporting_bug_this_prevents():
         "cannot read right now: rate limited"
     assert render(Outcome.empty()) == "nothing needs attention"
     assert render(Outcome.ok([1])) == "1 items need attention"
+
+
+class TestEmptyAndNoneInput:
+    """`None` is the state this type exists to keep separate from empty."""
+
+    def test_ok_with_an_empty_sequence_is_a_confirmed_absence(self):
+        for empty in ([], (), set()):
+            o = Outcome.ok(empty)
+            assert o.is_known and o.is_empty and o.unwrap() == ()
+
+    def test_ok_refuses_none_rather_than_inventing_an_empty_result(self):
+        """`tuple(None)` would be a crash; silently returning () would be worse
+        — a failed read must never render as 'nothing to do'."""
+        with pytest.raises(TypeError):
+            Outcome.ok(None)
+
+    @pytest.mark.parametrize("text", ["", "abc"])
+    def test_ok_refuses_a_string_including_an_empty_one(self, text):
+        """tuple("abc") == ('a','b','c') — a silent explosion into characters."""
+        with pytest.raises(TypeError, match="not a string"):
+            Outcome.ok(text)
+
+    @pytest.mark.parametrize("reason", ["", None])
+    def test_unknown_refuses_a_blank_reason(self, reason):
+        with pytest.raises(ValueError, match="requires a reason"):
+            Outcome.unknown(reason)
+
+    def test_a_reasonless_unknown_still_fails_loudly_if_one_is_built(self):
+        """Constructed directly rather than through `unknown()`."""
+        with pytest.raises(DataUnavailable, match="source unavailable"):
+            Outcome(None, None).unwrap()
+
+    def test_items_that_are_none_are_still_data(self):
+        """A row of nulls is something the source said, not silence."""
+        o = Outcome.ok([None, None])
+        assert o.is_known and not o.is_empty and len(o) == 2 and bool(o)
+
+    def test_an_empty_fallback_is_still_an_explicit_choice(self):
+        assert Outcome.unknown("down").unwrap_or([]) == ()
+        assert Outcome.unknown("down").unwrap_or(()) == ()
+
+    def test_empty_and_unknown_are_never_equal(self):
+        assert Outcome.empty() != Outcome.unknown("down")
