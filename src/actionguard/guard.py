@@ -93,11 +93,18 @@ class ActionGuard:
                 raise Rejected("value must be a finite number", proposal)
             value = spec.clamp(value, self._current.get(target))
 
+        # `.get(key, default)` only returns the default when the key is absent.
+        # A present-but-null rationale would reach str() and land in the audit
+        # log as the word "None" — a line that reads like a reason the model
+        # gave. An empty rationale is honest; a fabricated one is not.
+        raw_rationale = proposal.get("rationale")
+        rationale = "" if raw_rationale is None else str(raw_rationale)
+
         return Action(
             kind=kind,
             target_id=target,
             value=value,
-            rationale=str(proposal.get("rationale", ""))[:500],
+            rationale=rationale[:500],
         )
 
     def validate_all(self, proposals: list[dict]) -> tuple[list[Action], list[Rejected]]:
