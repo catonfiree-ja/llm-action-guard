@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .text import text_field
+
 # Order matters: the space-grouped form is tried first, and a space only
 # continues a number when followed by exactly three digits. A plain `\s` in the
 # character class merged "for 320 clicks at 26" into one number — which then
@@ -165,7 +167,11 @@ class Evidence:
             body_lines, cols = [], []
         else:
             cols = list(dict.fromkeys(k for r in self.rows for k in r))
-            body_lines = [" | ".join(str(r.get(c, "")) for c in cols)
+            # A null cell is an absence, and must render as one. Left as
+            # `str(...)` it prints "None" inside the table the model is told
+            # to treat as the complete set of figures — a token it can read
+            # back as data.
+            body_lines = [" | ".join(text_field(r, c) for c in cols)
                           for r in self.rows]
         parts = [
             "Here is the complete set of figures. Use only these.",

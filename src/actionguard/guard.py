@@ -16,6 +16,7 @@ discarded when it does not fit.
 from __future__ import annotations
 
 from .actions import Action, ActionSpec, FORBIDDEN_KINDS, Rejected
+from .text import text_field
 
 
 class ActionGuard:
@@ -61,13 +62,21 @@ class ActionGuard:
         if not isinstance(proposal, dict):
             raise Rejected("proposal is not an object", proposal)
 
-        kind = str(proposal.get("kind", "")).strip().lower()
-        target = str(proposal.get("target_id", "")).strip()
+        kind = text_field(proposal, "kind").strip().lower()
+        target = text_field(proposal, "target_id").strip()
 
         # Order matters: the permanent ban is checked before the allow-list, so
         # a misconfigured allow-list still cannot let a forbidden kind through.
         if kind in FORBIDDEN_KINDS:
             raise Rejected(f"{kind!r} is permanently forbidden", proposal)
+        if not kind:
+            # Same rejection, honest reason. Saying "'none' is not an allowed
+            # action" sends whoever reads the log looking for a kind the model
+            # never sent.
+            raise Rejected(
+                "no action kind was given — an absent, null or blank 'kind' "
+                "is not an allowed action "
+                f"(allowed: {', '.join(self.allowed_kinds)})", proposal)
         if kind not in self._specs:
             raise Rejected(
                 f"{kind!r} is not an allowed action "
@@ -93,18 +102,14 @@ class ActionGuard:
                 raise Rejected("value must be a finite number", proposal)
             value = spec.clamp(value, self._current.get(target))
 
-        # `.get(key, default)` only returns the default when the key is absent.
-        # A present-but-null rationale would reach str() and land in the audit
-        # log as the word "None" — a line that reads like a reason the model
-        # gave. An empty rationale is honest; a fabricated one is not.
-        raw_rationale = proposal.get("rationale")
-        rationale = "" if raw_rationale is None else str(raw_rationale)
-
+        # A present-but-null rationale must not land in the audit log as the
+        # word "None" — a line that reads like a reason the model gave. An
+        # empty rationale is honest; a fabricated one is not. See `text_field`.
         return Action(
             kind=kind,
             target_id=target,
             value=value,
-            rationale=rationale[:500],
+            rationale=text_field(proposal, "rationale")[:500],
         )
 
     def validate_all(self, proposals: list[dict]) -> tuple[list[Action], list[Rejected]]:
