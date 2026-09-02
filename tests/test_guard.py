@@ -118,3 +118,101 @@ def test_rationale_is_truncated_not_trusted():
     action = make().validate({"kind": "stop", "target_id": "c1",
                               "rationale": "x" * 5_000})
     assert len(action.rationale) == 500
+
+
+class TestEmptyAndNoneInput:
+    """A model that produces nothing must fail the same way as one that
+    produces nonsense: refused, in code, with a reason worth logging."""
+
+    @pytest.mark.parametrize("proposal", [None, "", 0, [], ()])
+    def test_a_non_object_proposal_is_refused(self, proposal):
+        with pytest.raises(Rejected, match="not an object"):
+            make().validate(proposal)
+
+    def test_an_empty_object_names_no_action(self):
+        with pytest.raises(Rejected, match="not an allowed action"):
+            make().validate({})
+
+    @pytest.mark.parametrize("kind", ["", "   ", None])
+    def test_a_blank_or_missing_kind_is_not_an_allowed_action(self, kind):
+        with pytest.raises(Rejected, match="not an allowed action"):
+            make().validate({"kind": kind, "target_id": "c1"})
+
+    @pytest.mark.parametrize("target", ["", "   ", None])
+    def test_a_blank_or_missing_target_was_never_offered(self, target):
+        """An absent id must not collapse into 'whichever one you like'."""
+        with pytest.raises(Rejected, match="was not offered"):
+            make().validate({"kind": "stop", "target_id": target})
+
+    def test_a_missing_value_is_refused_for_a_kind_that_needs_one(self):
+        with pytest.raises(Rejected, match="requires a numeric value"):
+            make().validate({"kind": "set_budget", "target_id": "c1"})
+
+    def test_a_missing_rationale_stays_a_short_string(self):
+        """It lands in the audit log, so it must never be None or unbounded."""
+        for proposal in ({"kind": "stop", "target_id": "c1"},
+                         {"kind": "stop", "target_id": "c1", "rationale": None}):
+            action = make().validate(proposal)
+            assert isinstance(action.rationale, str)
+            assert len(action.rationale) <= 500
+
+    def test_no_specs_means_nothing_is_decidable(self):
+        """An empty allow-list allows nothing — it is not a wildcard."""
+        guard = ActionGuard([], offered_ids=["c1"])
+        assert guard.allowed_kinds == ()
+        with pytest.raises(Rejected, match="not an allowed action"):
+            guard.validate({"kind": "stop", "target_id": "c1"})
+
+    @pytest.mark.parametrize("offered", [None, [], ()])
+    def test_an_absent_offer_list_is_refused_at_construction(self, offered):
+        with pytest.raises(ValueError, match="empty"):
+            ActionGuard(SPECS, offered_ids=offered)
+
+    @pytest.mark.parametrize("current", [None, {}, {"c1": None}])
+    def test_an_unknown_current_value_falls_back_to_the_absolute_ceiling(
+            self, current):
+        """No baseline means no ratio window — but never an open window."""
+        action = ActionGuard(SPECS, offered_ids=["c1"],
+                             current_values=current).validate(
+            {"kind": "set_budget", "target_id": "c1", "value": 9_999_999})
+        assert action.value == pytest.approx(100_000.0)
+
+    def test_a_current_value_of_zero_clamps_to_the_floor_not_to_zero(self):
+        """±20% of 0 is 0. Taken literally that zeroes the budget, so the
+        absolute floor has to win."""
+        action = make(current={"c1": 0.0}).validate(
+            {"kind": "set_budget", "target_id": "c1", "value": 9_999_999})
+        assert action.value == pytest.approx(50.0)
+
+    def test_an_empty_batch_is_not_an_error(self):
+        assert make().validate_all([]) == ([], [])
+
+    def test_a_null_batch_is_not_an_error(self):
+        assert make().validate_all(None) == ([], [])
+
+    @pytest.mark.parametrize("junk", ["", "stop"])
+    def test_a_string_batch_yields_one_rejection_not_one_per_letter(self, junk):
+        kept, dropped = make().validate_all(junk)
+        assert kept == [] and len(dropped) == 1
+        assert "not a list" in dropped[0].reason
+
+    def test_empty_proposals_in_a_batch_are_dropped_with_a_reason(self):
+        kept, dropped = make().validate_all([
+            None, {}, {"kind": "stop", "target_id": "c1"}])
+        assert [a.target_id for a in kept] == ["c1"]
+        assert len(dropped) == 2
+        assert all(d.reason for d in dropped)
+
+
+class TestEmptySpecKind:
+    @pytest.mark.parametrize("kind", ["", "   "])
+    def test_a_blank_spec_kind_is_refused(self, kind):
+        """A nameless spec would sit in the allow-list unreachable, and every
+        proposal with a missing kind would match it."""
+        with pytest.raises(ValueError, match="kind is required"):
+            ActionSpec(kind)
+
+    def test_a_value_kind_without_a_range_is_refused(self):
+        """Defaults are 0/0 — left alone, every budget clamps to zero."""
+        with pytest.raises(ValueError, match="needs a real range"):
+            ActionSpec("set_budget", needs_value=True)

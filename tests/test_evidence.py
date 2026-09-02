@@ -91,3 +91,57 @@ class TestPromptBlock:
     def test_empty_evidence_is_explicit(self):
         block = Evidence([]).prompt_block()
         assert "(no rows)" in block and "Use only these" in block
+
+
+class TestEmptyAndNoneInput:
+    """Empty prose and an empty table are both normal. Neither may turn the
+    grounding check into a formality that passes everything."""
+
+    @pytest.mark.parametrize("text", ["", None, "   ", "no figures here"])
+    def test_text_without_figures_has_nothing_to_check(self, ev, text):
+        assert numbers_in(text) == []
+        assert ev.unsupported_numbers(text) == []
+        ev.assert_grounded(text)
+
+    def test_an_empty_table_supports_no_figure(self):
+        """The dangerous reading is 'nothing known, so nothing to object to'."""
+        assert Evidence([]).unsupported_numbers("we spent 500") == [500.0]
+
+    def test_an_empty_table_still_permits_counting_nothing(self):
+        assert Evidence([]).unsupported_numbers("0 campaigns need attention") == []
+
+    def test_empty_rows_contribute_no_values(self):
+        assert Evidence([{}, {}]).values() == set()
+
+    @pytest.mark.parametrize("cell", [None, "", "   ", "n/a"])
+    def test_a_blank_cell_is_not_a_citable_figure(self, cell):
+        """A null cost must not become a licence to write any number."""
+        e = Evidence([{"id": "a1", "spend": cell}])
+        assert e.values() == set()
+        assert e.unsupported_numbers("a1 spent 4,000") == [4_000.0]
+
+    def test_blank_notes_are_ignored(self):
+        assert Evidence([], notes={"days": None, "window": ""}).values() == set()
+
+    def test_a_zero_in_the_table_is_citable(self):
+        """0.0 is a figure, not an absence — `if not value` would drop it."""
+        e = Evidence([{"id": "a1", "conversions": 0}])
+        assert 0.0 in e.values()
+
+    def test_rows_of_empty_dicts_render_as_no_rows(self):
+        block = Evidence([{}]).prompt_block()
+        assert "(no rows)" in block and "Use only these" in block
+
+    def test_an_empty_table_keeps_its_notes_in_the_prompt(self):
+        block = Evidence([], notes={"days": 30}).prompt_block()
+        assert "(no rows)" in block and "days=30" in block
+
+    def test_the_count_exemption_shrinks_with_an_empty_table(self):
+        """Otherwise a report over no data waves through every small integer."""
+        assert Evidence([]).unsupported_numbers("3 of them are wasteful") == [3.0]
+
+    def test_an_explicit_zero_ceiling_disables_the_count_exemption(self, ev):
+        """Counting is a courtesy, and an operator may withdraw it."""
+        assert ev.unsupported_numbers("1 campaign is wasteful") == []
+        strict = Evidence(ROWS, allow_counts_up_to=0)
+        assert strict.unsupported_numbers("1 campaign is wasteful") == [1.0]
